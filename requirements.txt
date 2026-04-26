@@ -1,0 +1,12 @@
+# FIX (Missing Item 1): This file was completely absent from the project.
+# Without requirements.txt, anyone who clones the repo has no way to know
+# what packages to install, and 'pip install' has nothing to run.
+#
+# To install all dependencies, run:
+#   pip install -r requirements.txt
+
+pdfplumber
+psycopg2-binary
+python-dotenv
+pytesseract
+Pillow
