@@ -8,7 +8,6 @@ load_dotenv()
 
 
 def get_connection():
-    """Creates and returns a new database connection using .env credentials."""
     return psycopg2.connect(
         dbname=os.getenv("DB_NAME"),
         user=os.getenv("DB_USER"),
@@ -19,14 +18,6 @@ def get_connection():
 
 
 def create_table():
-    """
-    Creates the invoices table if it does not already exist.
-    Call this once at startup inside main().
-
-    FIX (Missing Item 2): The original project had no CREATE TABLE code at all.
-    Without this, every INSERT would fail with 'relation does not exist'.
-    """
-    # FIX (Bug 1): conn and cursor initialized to None BEFORE try block.
     conn = None
     cursor = None
     try:
@@ -35,8 +26,9 @@ def create_table():
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS invoices (
-                id         SERIAL PRIMARY KEY,
-                data       JSONB     NOT NULL,
+                id SERIAL PRIMARY KEY,
+                file_hash TEXT UNIQUE,   -- 🔥 NEW (IMPORTANT)
+                data JSONB NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW()
             );
         """)
@@ -54,16 +46,9 @@ def create_table():
             conn.close()
 
 
-def save_to_db(data):
+def is_duplicate(file_hash):
     """
-    Inserts extracted invoice data as JSON into the invoices table.
-
-    FIX (Bug 1): conn and cursor are now initialized to None BEFORE the try block.
-    In the original code they were only assigned inside try, so if
-    psycopg2.connect() raised an exception (e.g. wrong password, Postgres not
-    running), the finally block would crash with:
-        NameError: name 'cursor' is not defined
-    Now the finally block safely checks 'if cursor' and 'if conn' without error.
+    Check if file already exists in DB
     """
     conn = None
     cursor = None
@@ -71,8 +56,31 @@ def save_to_db(data):
         conn = get_connection()
         cursor = conn.cursor()
 
-        query = "INSERT INTO invoices (data) VALUES (%s);"
-        cursor.execute(query, [json.dumps(data)])
+        cursor.execute("SELECT 1 FROM invoices WHERE file_hash = %s", (file_hash,))
+        result = cursor.fetchone()
+
+        return result is not None
+
+    except Exception as e:
+        logging.error(f"Duplicate check error: {str(e)}")
+        return False
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+def save_to_db(data, file_hash):
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        query = "INSERT INTO invoices (file_hash, data) VALUES (%s, %s);"
+        cursor.execute(query, (file_hash, json.dumps(data)))
 
         conn.commit()
         logging.info("Data inserted into DB successfully.")
