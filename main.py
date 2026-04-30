@@ -35,7 +35,7 @@ def process_pdf(pdf_path):
 
         if not file_hash:
             print("❌ Hash generation failed")
-            return
+            return None
 
         print(f"🔐 File Hash: {file_hash}")
 
@@ -43,9 +43,11 @@ def process_pdf(pdf_path):
         if is_duplicate(file_hash):
             print("⚠️ Duplicate file detected → Skipping")
             logging.warning(f"Duplicate skipped: {pdf_path}")
-            return
+            return {"status": "duplicate", "file": pdf_path}
 
+        # ============================================
         # STEP 1 — Extract text
+        # ============================================
         text = extract_text(pdf_path)
 
         # STEP 2 — OCR fallback
@@ -55,18 +57,23 @@ def process_pdf(pdf_path):
 
         if not text.strip():
             print("❌ Failed to extract text")
-            return
+            return None
 
         print(f"✅ Text length: {len(text)}")
 
-        # STEP 3 — Layout
+        # ============================================
+        # STEP 3 — Layout extraction
+        # ============================================
         layout_output = extract_layout_data(pdf_path) or {
             "invoice_details": {},
             "items": []
         }
 
+        # ============================================
         # STEP 4 — Smart extraction
+        # ============================================
         invoice_data, confidence = smart_extract_data(text)
+
         print(f"🧠 Confidence: {confidence}")
 
         if confidence < CONFIDENCE_THRESHOLD:
@@ -75,19 +82,25 @@ def process_pdf(pdf_path):
 
         layout_output["invoice_details"] = invoice_data
 
+        # ============================================
         # STEP 5 — Items fallback
+        # ============================================
         if not layout_output["items"]:
             tables = extract_tables(pdf_path)
             layout_output["items"] = extract_items_from_tables(tables)
 
+        # ============================================
         # STEP 6 — Add IDs
+        # ============================================
         final_output = layout_output
         final_output["document_id"] = str(uuid.uuid4())
         final_output["file_hash"] = file_hash
 
         print(f"🆔 Document ID: {final_output['document_id']}")
 
+        # ============================================
         # STEP 7 — Save JSON
+        # ============================================
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
         output_path = os.path.join(
@@ -100,16 +113,22 @@ def process_pdf(pdf_path):
 
         print(f"💾 JSON saved: {output_path}")
 
+        # ============================================
         # STEP 8 — Save DB
+        # ============================================
         save_to_db(final_output, file_hash)
         print("💾 Saved to DB")
 
         end = time.time()
         print(f"⏱️ Time: {round(end - start, 2)} sec")
 
+        # 🔥🔥🔥 VERY IMPORTANT FOR API
+        return final_output
+
     except Exception as e:
         logging.error(f"Error processing {pdf_path}: {str(e)}")
         print(f"❌ Error: {e}")
+        return None
 
 
 def main():

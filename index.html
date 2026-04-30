@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF Extractor</title>
+</head>
+<body>
+
+<h2>Upload PDF</h2>
+
+<input type="file" id="fileInput">
+<button onclick="upload()">Upload</button>
+
+<h3 id="status"></h3>
+<pre id="result"></pre>
+
+<script>
+async function upload() {
+    const fileInput = document.getElementById("fileInput");
+    const file = fileInput.files[0];
+
+    if (!file) {
+        alert("Please select a file");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+        const response = await fetch("http://127.0.0.1:8000/upload/", {
+            method: "POST",
+            body: formData
+        });
+
+        const data = await response.json();
+
+        // 🔥 HANDLE ALL CASES
+        if (data.status === "success") {
+            document.getElementById("status").innerText = "✅ Success";
+            document.getElementById("result").innerText =
+                JSON.stringify(data.data, null, 2);
+
+        } else if (data.status === "duplicate") {
+            document.getElementById("status").innerText = "⚠️ Duplicate File";
+            document.getElementById("result").innerText =
+                "This file was already processed.";
+
+        } else {
+            document.getElementById("status").innerText = "❌ Error";
+            document.getElementById("result").innerText =
+                data.message || "Something went wrong";
+        }
+
+    } catch (error) {
+        document.getElementById("status").innerText = "❌ Network Error";
+        document.getElementById("result").innerText = error;
+    }
+}
+</script>
+
+</body>
+</html>

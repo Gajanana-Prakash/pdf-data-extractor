@@ -10,3 +10,6 @@ psycopg2-binary
 python-dotenv
 pytesseract
 Pillow
+fastapi
+uvicorn
+python-multipart
