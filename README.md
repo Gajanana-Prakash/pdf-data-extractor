@@ -1,162 +1,277 @@
-# PDF Data Extractor
+# 🚀 PDF Data Extractor (AI-Powered Document Processing System)
 
-A Python tool that reads invoice PDF files, extracts structured data (invoice number, dates, company, items, totals) using regex, saves the output as JSON files, and stores the data in a PostgreSQL database.
+A **production-ready, scalable PDF processing system** that extracts structured data from invoices/quotations using a **hybrid intelligent pipeline** combining:
+
+- Text extraction
+- OCR fallback (for scanned PDFs)
+- Layout-aware parsing
+- Smart extraction with confidence scoring
+- Regex fallback (when needed)
+
+The system provides:
+✔ Batch processing pipeline  
+✔ PostgreSQL storage  
+✔ FastAPI-based backend API  
+✔ Optional frontend UI  
 
 ---
 
-## Project Structure
+## 🧠 Key Features
+
+### 📄 Document Processing
+- Supports multiple PDF formats
+- Works with:
+  - Text-based PDFs
+  - Scanned/image-based PDFs (OCR)
+
+### 🤖 Intelligent Extraction
+- Smart parser with confidence scoring
+- Automatic fallback to regex
+- Multi-pattern extraction logic
+
+### 🧩 Layout-Aware Parsing
+- Extracts:
+  - Invoice details
+  - Line items
+  - Totals
+
+### 🔁 Fault Tolerance
+- One file failure does NOT stop system
+
+### ⚡ Performance
+- Parallel processing using multiprocessing
+
+### 🔐 Duplicate Detection
+- SHA256 file hashing
+
+### 🆔 Unique Tracking
+- Each document has:
+  - `document_id`
+  - `file_hash`
+
+### 🌐 API + UI
+- FastAPI backend
+- Upload & process PDFs
+- Optional frontend interface
+
+---
+
+## 📁 Project Structure
 
 ```
 pdf-data-extractor/
-├── pdfs/               # Place your input PDF files here
-├── output/             # Extracted JSON files are saved here (auto-created)
-├── main.py             # Entry point — runs the full pipeline
-├── extractor.py        # Extracts raw text from PDF using pdfplumber
-├── parser.py           # Parses invoice fields from text using regex
-├── db.py               # Saves data to PostgreSQL database
-├── logger.py           # Configures logging to app.log
-├── .env                # Your database credentials (never commit this)
-├── requirements.txt    # Python dependencies
-└── README.md           # This file
+├── pdfs/                 # Input PDFs
+├── output/               # JSON outputs
+├── main.py               # Core pipeline
+├── api.py                # FastAPI backend
+├── extractor.py          # Text extraction
+├── ocr.py                # OCR fallback
+├── parser.py             # Regex parsing
+├── smart_parser.py       # Smart extraction
+├── layout_parser.py      # Layout parsing
+├── db.py                 # Database logic
+├── utils.py              # File hash generation
+├── config.py             # Config settings
+├── logger.py             # Logging
+├── index.html            # Frontend UI (optional)
+├── .env                  # Environment variables
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## Setup Instructions
+## ⚙️ Setup Instructions
 
-### 1. Clone the repository
-
+### 1. Clone Repository
 ```bash
 git clone https://github.com/your-username/pdf-data-extractor.git
 cd pdf-data-extractor
 ```
 
-### 2. Create and activate a virtual environment
-
+### 2. Create Virtual Environment
 ```bash
 python -m venv venv
 
-# On Windows:
+# Windows
 venv\Scripts\activate
 
-# On Mac/Linux:
+# Mac/Linux
 source venv/bin/activate
 ```
 
-### 3. Install dependencies
-
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Set up PostgreSQL
+---
 
-Make sure PostgreSQL is installed and running on your machine. Then create a database:
+## 🐘 PostgreSQL Setup
 
 ```sql
 CREATE DATABASE pdf_data;
 ```
 
-> The `invoices` table is created automatically when you run the project — you do not need to create it manually.
+Table is created automatically.
 
-### 5. Configure environment variables
+---
 
-Create a `.env` file in the project root (copy the example below):
+## 🔐 Environment Variables
+
+Create `.env` file:
 
 ```
 DB_NAME=pdf_data
 DB_USER=postgres
-DB_PASSWORD=your_password_here
+DB_PASSWORD=your_password
 DB_HOST=localhost
 DB_PORT=5432
 ```
 
-> **Important:** Never commit your `.env` file to GitHub. It is already listed in `.gitignore`.
-
-### 6. Add your PDF files
-
-Place your invoice PDF files inside the `pdfs/` folder:
-
-```
-pdfs/
-├── invoice1.pdf
-├── invoice2.pdf
-└── ...
-```
-
 ---
 
-## Running the Project
+## ▶️ Run Batch Processing
 
 ```bash
 python main.py
 ```
 
-**What happens when you run it:**
-
-1. The `invoices` table is created in PostgreSQL (if it doesn't exist yet)
-2. Every `.pdf` file in the `pdfs/` folder is processed
-3. Extracted data is saved as a `.json` file in the `output/` folder
-4. The same data is inserted into the PostgreSQL `invoices` table
-5. All activity is logged to `app.log`
+### What happens:
+1. Reads PDFs from `pdfs/`
+2. Generates file hash (duplicate detection)
+3. Extracts text / OCR fallback
+4. Smart + layout + regex extraction
+5. Saves JSON → `output/`
+6. Stores data in PostgreSQL
+7. Logs activity → `app.log`
 
 ---
 
-## Output Example
+## 🌐 Run API (FastAPI)
 
-For `pdfs/sample.pdf`, the tool creates `output/sample.json`:
+```bash
+uvicorn api:app --reload
+```
+
+Open:
+👉 http://127.0.0.1:8000/docs
+
+Upload PDF → Get JSON response
+
+---
+
+## 🖥️ Run Frontend UI (Optional)
+
+```bash
+python -m http.server 5500
+```
+
+Open:
+👉 http://127.0.0.1:5500/index.html
+
+---
+
+## 📄 Output Example
 
 ```json
 {
-    "invoice_details": {
-        "invoice_number": "INV-20260408-001",
-        "invoice_date": "08 April 2026",
-        "due_date": "08 May 2026",
-        "company": "Acme Technologies Pvt Ltd",
-        "customer": "Global Retail Solutions Ltd",
-        "total_amount": 277170.20
-    },
-    "items": [
-        {
-            "description": "Wireless Bluetooth Headphones",
-            "quantity": 15,
-            "unit_price": 2499.0,
-            "amount": 37485.0
-        }
-    ]
+  "document_id": "uuid",
+  "file_hash": "sha256_hash",
+  "invoice_details": {
+    "invoice_number": "INV-001",
+    "date": "2026-04-01",
+    "company": "ABC Pvt Ltd",
+    "total_amount": 10000
+  },
+  "items": [
+    {
+      "description": "Product A",
+      "quantity": 2,
+      "price": 5000
+    }
+  ]
 }
 ```
 
 ---
 
-## Database Schema
+## 🧠 Architecture
 
-The `invoices` table is created automatically with this structure:
-
-```sql
-CREATE TABLE IF NOT EXISTS invoices (
-    id         SERIAL PRIMARY KEY,
-    data       JSONB     NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+```
+PDF Input
+   ↓
+Text Extraction / OCR
+   ↓
+Layout Parsing
+   ↓
+Smart Extraction (Confidence Engine)
+   ↓
+Regex Fallback
+   ↓
+JSON Output
+   ↓
+PostgreSQL
+   ↓
+API Response
 ```
 
 ---
 
-## Troubleshooting
+## 🏢 Industry-Level Capabilities
 
-| Problem | Solution |
-|---|---|
-| `ModuleNotFoundError` | Run `pip install -r requirements.txt` |
-| `psycopg2.OperationalError` | Check your `.env` credentials and that PostgreSQL is running |
-| `No PDF files found` | Place PDF files inside the `pdfs/` folder |
-| Items not extracted | Your PDF may use a different table format — check `parser.py` regex patterns |
+- Document AI systems
+- Invoice automation tools
+- OCR platforms
+- ETL pipelines
 
 ---
 
-## Tech Stack
+## 🛠️ Tech Stack
 
-- **Python 3.8+**
-- **pdfplumber** — PDF text extraction
-- **psycopg2** — PostgreSQL database connector
-- **python-dotenv** — Loads `.env` environment variables
+- Python 3.8+
+- pdfplumber
+- pytesseract
+- FastAPI
+- PostgreSQL (psycopg2)
+- multiprocessing
+- python-dotenv
+
+---
+
+## 🧪 Troubleshooting
+
+| Problem | Solution |
+|--------|---------|
+| No PDFs found | Add files to `pdfs/` |
+| OCR not working | Install Tesseract |
+| DB error | Check `.env` |
+| Duplicate skipped | File already processed |
+| API fetch error | Enable CORS |
+
+---
+
+## 🎯 Final Outcome
+
+You built:
+
+✅ Scalable ETL pipeline  
+✅ AI-like document processor  
+✅ API-based system  
+✅ Full-stack mini product  
+
+---
+
+## 💬 Interview Line
+
+> “I built a scalable document processing system with OCR, layout parsing, intelligent extraction, and a FastAPI interface.”
+
+---
+
+## 🚀 Future Improvements
+
+- Cloud deployment (AWS/GCP)
+- ML/NLP models
+- React frontend
+- Authentication system
+- Dashboard analytics

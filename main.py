@@ -18,11 +18,17 @@ import time
 from multiprocessing import Pool
 
 
+# ============================================
+# 🔁 MULTIPROCESS WRAPPER
+# ============================================
 def process_wrapper(file):
     pdf_path = os.path.join(PDF_FOLDER, file)
     process_pdf(pdf_path)
 
 
+# ============================================
+# 🚀 MAIN PROCESS FUNCTION (PRODUCTION SAFE)
+# ============================================
 def process_pdf(pdf_path):
     try:
         start = time.time()
@@ -30,39 +36,63 @@ def process_pdf(pdf_path):
         logging.info(f"Processing file: {pdf_path}")
         print(f"\n🔄 Processing: {pdf_path}")
 
-        # 🔐 STEP 0 — Generate Hash
+        # ============================================
+        # 🔐 STEP 0 — FILE HASH
+        # ============================================
         file_hash = generate_file_hash(pdf_path)
 
         if not file_hash:
-            print("❌ Hash generation failed")
-            return None
+            logging.error("Hash generation failed")
+            return {
+                "status": "failed",
+                "reason": "Hash generation failed"
+            }
 
         print(f"🔐 File Hash: {file_hash}")
 
-        # 🔁 Duplicate Check
+        # Duplicate check
         if is_duplicate(file_hash):
-            print("⚠️ Duplicate file detected → Skipping")
             logging.warning(f"Duplicate skipped: {pdf_path}")
-            return {"status": "duplicate", "file": pdf_path}
+            return {
+                "status": "duplicate",
+                "file": pdf_path
+            }
 
         # ============================================
-        # STEP 1 — Extract text
+        # 📝 STEP 1 — TEXT EXTRACTION
         # ============================================
         text = extract_text(pdf_path)
 
-        # STEP 2 — OCR fallback
+        # OCR fallback
         if not text.strip():
+            logging.warning("No text found → Using OCR")
             print("⚠️ No text found → Using OCR")
             text = extract_text_with_ocr(pdf_path)
 
-        if not text.strip():
-            print("❌ Failed to extract text")
-            return None
+        # ============================================
+        # 🧠 STEP 2 — TEXT VALIDATION (FIXED)
+        # ============================================
+        clean_text = text.strip()
 
-        print(f"✅ Text length: {len(text)}")
+        if not clean_text:
+            logging.error("❌ No text extracted even after OCR")
+            return {
+                "status": "failed",
+                "reason": "No readable text found (OCR failed)",
+                "file": pdf_path
+            }
+
+        print(f"✅ Text length: {len(clean_text)}")
+
+        # Weak text handling
+        weak_text = False
+        if len(clean_text) < 50:
+            weak_text = True
+            logging.warning("⚠️ Weak text detected")
+            print("⚠️ Weak text → extraction may be poor")
 
         # ============================================
-        # STEP 3 — Layout extraction
+        # 📐 STEP 3 — LAYOUT EXTRACTION
         # ============================================
         layout_output = extract_layout_data(pdf_path) or {
             "invoice_details": {},
@@ -70,27 +100,33 @@ def process_pdf(pdf_path):
         }
 
         # ============================================
-        # STEP 4 — Smart extraction
+        # 🤖 STEP 4 — SMART EXTRACTION
         # ============================================
-        invoice_data, confidence = smart_extract_data(text)
+        invoice_data, confidence = smart_extract_data(clean_text)
 
         print(f"🧠 Confidence: {confidence}")
 
+        # Force fallback if weak text
+        if weak_text:
+            confidence = 0
+
         if confidence < CONFIDENCE_THRESHOLD:
+            logging.warning("Using regex fallback")
             print("⚠️ Using regex fallback")
-            invoice_data = extract_data(text)
+            invoice_data = extract_data(clean_text)
 
         layout_output["invoice_details"] = invoice_data
 
         # ============================================
-        # STEP 5 — Items fallback
+        # 📦 STEP 5 — ITEMS FALLBACK
         # ============================================
         if not layout_output["items"]:
+            logging.warning("Items fallback triggered")
             tables = extract_tables(pdf_path)
             layout_output["items"] = extract_items_from_tables(tables)
 
         # ============================================
-        # STEP 6 — Add IDs
+        # 🆔 STEP 6 — ADD IDS
         # ============================================
         final_output = layout_output
         final_output["document_id"] = str(uuid.uuid4())
@@ -99,7 +135,7 @@ def process_pdf(pdf_path):
         print(f"🆔 Document ID: {final_output['document_id']}")
 
         # ============================================
-        # STEP 7 — Save JSON
+        # 💾 STEP 7 — SAVE JSON
         # ============================================
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
@@ -114,25 +150,34 @@ def process_pdf(pdf_path):
         print(f"💾 JSON saved: {output_path}")
 
         # ============================================
-        # STEP 8 — Save DB
+        # 🗄️ STEP 8 — SAVE TO DB
         # ============================================
         save_to_db(final_output, file_hash)
         print("💾 Saved to DB")
 
+        # ============================================
+        # ⏱️ STEP 9 — TIME TRACKING
+        # ============================================
         end = time.time()
         print(f"⏱️ Time: {round(end - start, 2)} sec")
 
-        # 🔥🔥🔥 VERY IMPORTANT FOR API
         return final_output
 
     except Exception as e:
-        logging.error(f"Error processing {pdf_path}: {str(e)}")
-        print(f"❌ Error: {e}")
-        return None
+        logging.exception(f"🔥 FULL ERROR in file: {pdf_path}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "file": pdf_path
+        }
 
 
+# ============================================
+# 🧠 MAIN FUNCTION
+# ============================================
 def main():
     setup_logger()
+    logging.info("Application started.")
     print("🚀 Application Started")
 
     create_table()
@@ -153,6 +198,7 @@ def main():
             p.map(process_wrapper, pdf_files)
 
     except Exception as e:
+        logging.error(f"Multiprocessing failed: {str(e)}")
         print("⚠️ Multiprocessing failed → fallback")
 
         for file in pdf_files:
@@ -161,5 +207,8 @@ def main():
     print("\n🎉 All files processed!")
 
 
+# ============================================
+# 🚀 ENTRY POINT
+# ============================================
 if __name__ == "__main__":
     main()
