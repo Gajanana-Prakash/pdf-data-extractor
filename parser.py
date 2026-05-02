@@ -1,101 +1,130 @@
 import re
 
 
-# 🔥 NEW — CLEANING FUNCTION (VERY IMPORTANT)
 def clean_number(value):
     """
-    Converts messy values like:
-    '₹1,200.50', 'n500.00', 'Rs 300', None → 1200.50, 500.00, 300.0
-
-    This makes your system robust for real-world PDFs.
+    Converts messy values like '₹1,200.50', 'n500.00', 'Rs 300', None → float.
     """
     if value is None:
         return 0.0
-
-    # Convert to string
     value = str(value)
-
-    # Remove everything except digits and dot
     value = re.sub(r"[^\d.]", "", value)
-
-    # If empty after cleaning
-    if value == "":
+    if value == "" or value == ".":
         return 0.0
-
+    # Guard against multiple dots (e.g. "1.2.3")
+    parts = value.split(".")
+    if len(parts) > 2:
+        value = parts[0] + "." + "".join(parts[1:])
     return float(value)
 
 
 def extract_data(text):
     """
-    Basic header extraction (still regex-based for now)
-    Will be improved in Day 4 (layout-based)
+    Regex fallback parser.
+
+    FIX 1: invoice_date regex used .* which greedily consumed
+    everything to end of line including trailing spaces/junk.
+    Changed to capture only up to end of meaningful content.
+
+    FIX 2: company/customer regex used re.DOTALL crossing
+    multiple lines — easily grabbed half the document.
+    Replaced with line-by-line approach looking for the line
+    immediately after the "From:" / "To:" label.
+
+    FIX 3: total regex stopped at first match which could be
+    a subtotal. Now searches for Grand Total / Amount Due first.
     """
     data = {}
 
-    invoice_no = re.search(r"Invoice No\.?\s*:?\s*(\S+)", text)
-    invoice_date = re.search(r"Invoice Date\s*:?\s*(.*)", text)
-    due_date = re.search(r"Due Date\s*:?\s*(.*)", text)
+    # Invoice number
+    inv_no = re.search(r"Invoice\s*(?:No\.?|Number|#)\s*[:\-]?\s*(\S+)", text, re.IGNORECASE)
+    data["invoice_number"] = inv_no.group(1).strip() if inv_no else None
 
-    company = re.search(r"From:\s*(.*?)\s*To:", text, re.DOTALL)
-    customer = re.search(r"To:\s*(.*?)(?:Item|Description)", text, re.DOTALL)
-
-    total = re.search(r"Total\s*:?\s*[^\d]?([\d,\.]+)", text)
-
-    data["invoice_number"] = invoice_no.group(1) if invoice_no else None
-    data["invoice_date"] = invoice_date.group(1).strip() if invoice_date else None
+    # Dates — capture up to 20 chars to avoid overrun
+    inv_date = re.search(r"Invoice\s+Date\s*[:\-]?\s*(.{5,20})", text, re.IGNORECASE)
+    due_date = re.search(r"Due\s+Date\s*[:\-]?\s*(.{5,20})", text, re.IGNORECASE)
+    data["invoice_date"] = inv_date.group(1).strip() if inv_date else None
     data["due_date"] = due_date.group(1).strip() if due_date else None
 
-    data["company"] = company.group(1).split("\n")[0].strip() if company else None
-    data["customer"] = customer.group(1).split("\n")[0].strip() if customer else None
+    # Company: line immediately after "From:" label
+    lines = text.split("\n")
+    data["company"] = None
+    data["customer"] = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if re.match(r"^From\s*[:\-]?\s*$", stripped, re.IGNORECASE) and i + 1 < len(lines):
+            data["company"] = lines[i + 1].strip()
+        elif re.match(r"^From\s*[:\-]\s*\S", stripped, re.IGNORECASE):
+            data["company"] = re.sub(r"^From\s*[:\-]\s*", "", stripped, flags=re.IGNORECASE).strip()
+        if re.match(r"^(?:Bill\s+)?To\s*[:\-]?\s*$", stripped, re.IGNORECASE) and i + 1 < len(lines):
+            data["customer"] = lines[i + 1].strip()
+        elif re.match(r"^(?:Bill\s+)?To\s*[:\-]\s*\S", stripped, re.IGNORECASE):
+            data["customer"] = re.sub(r"^(?:Bill\s+)?To\s*[:\-]\s*", "", stripped, flags=re.IGNORECASE).strip()
 
-    # 🔥 FIXED — safe number conversion
-    data["total_amount"] = clean_number(total.group(1)) if total else None
+    # Total — prefer Grand Total / Amount Due over bare Total
+    grand = re.search(
+        r"(?:Grand\s+Total|Total\s+Amount|Amount\s+Due|Balance\s+Due)\s*[:\-]?\s*[₹Rs$]?\s*([\d,]+(?:\.\d{1,2})?)",
+        text, re.IGNORECASE,
+    )
+    if grand:
+        data["total_amount"] = clean_number(grand.group(1))
+    else:
+        total = re.search(r"Total\s*[:\-]?\s*[^\d]*([\d,\.]+)", text, re.IGNORECASE)
+        data["total_amount"] = clean_number(total.group(1)) if total else None
 
     return data
 
 
 def extract_items_from_tables(tables):
     """
-    Day 3 — Dynamic table parsing (NO HARD-CODED REGEX)
+    Dynamic table parser.
 
-    Works for:
-    ✔ Different column names
-    ✔ Corrupted currency symbols
-    ✔ Multiple table formats
+    FIX 1: quantity conversion used int(value) which crashes on
+    "2.0" (float string). Now uses int(float(...)).
+
+    FIX 2: Empty-row guard `any(v != "" ...)` passed even for rows
+    where only amount was filled — those are subtotal/total rows,
+    not items. Guard now requires "description" to be present.
+
+    FIX 3: Added tax/GST column support.
     """
     items = []
 
     try:
         for df in tables:
-            # Normalize column names
-            df.columns = [str(col).lower() for col in df.columns]
+            # Normalize column names, handle None
+            df.columns = [str(col).lower().strip() if col is not None else "" for col in df.columns]
 
             for _, row in df.iterrows():
                 item = {}
 
                 for col in df.columns:
                     value = row[col]
-
-                    if value is None:
+                    if value is None or str(value).strip() == "":
                         continue
 
                     col_name = col.lower()
 
-                    # 🔍 Dynamic column detection
-                    if "desc" in col_name or "item" in col_name or "product" in col_name:
+                    if any(k in col_name for k in ("desc", "item", "product", "particular", "name", "service")):
                         item["description"] = str(value).strip()
 
-                    elif "qty" in col_name or "quantity" in col_name:
-                        item["quantity"] = int(value) if str(value).isdigit() else 0
+                    elif any(k in col_name for k in ("qty", "quantity", "units", "nos")):
+                        try:
+                            item["quantity"] = int(float(re.sub(r"[^\d.]", "", str(value)) or 0))
+                        except (ValueError, TypeError):
+                            item["quantity"] = 0
 
-                    elif "price" in col_name or "rate" in col_name:
+                    elif any(k in col_name for k in ("price", "rate", "unit price", "mrp")):
                         item["unit_price"] = clean_number(value)
 
-                    elif "amount" in col_name or "total" in col_name:
+                    elif any(k in col_name for k in ("amount", "total", "line total")):
                         item["amount"] = clean_number(value)
 
-                # Avoid adding empty rows
-                if item and any(v != "" for v in item.values()):
+                    elif any(k in col_name for k in ("tax", "gst", "vat", "igst", "cgst", "sgst")):
+                        item["tax"] = clean_number(value)
+
+                # Only add rows that have a description — skip subtotal/total rows
+                if item.get("description"):
                     items.append(item)
 
         return items

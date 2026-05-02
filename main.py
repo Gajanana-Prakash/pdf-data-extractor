@@ -18,60 +18,38 @@ import time
 from multiprocessing import Pool
 
 
-# ============================================
-# 🔁 MULTIPROCESS WRAPPER
-# ============================================
 def process_wrapper(file):
     pdf_path = os.path.join(PDF_FOLDER, file)
     process_pdf(pdf_path)
 
 
-# ============================================
-# 🚀 MAIN PROCESS FUNCTION (PRODUCTION SAFE)
-# ============================================
 def process_pdf(pdf_path):
     try:
         start = time.time()
-
         logging.info(f"Processing file: {pdf_path}")
         print(f"\n🔄 Processing: {pdf_path}")
 
-        # ============================================
-        # 🔐 STEP 0 — FILE HASH
-        # ============================================
+        # STEP 0 — FILE HASH
         file_hash = generate_file_hash(pdf_path)
-
         if not file_hash:
             logging.error("Hash generation failed")
-            return {
-                "status": "failed",
-                "reason": "Hash generation failed"
-            }
+            return {"status": "failed", "reason": "Hash generation failed"}
 
         print(f"🔐 File Hash: {file_hash}")
 
-        # Duplicate check
         if is_duplicate(file_hash):
             logging.warning(f"Duplicate skipped: {pdf_path}")
-            return {
-                "status": "duplicate",
-                "file": pdf_path
-            }
+            return {"status": "duplicate", "file": pdf_path}
 
-        # ============================================
-        # 📝 STEP 1 — TEXT EXTRACTION
-        # ============================================
+        # STEP 1 — TEXT EXTRACTION
         text = extract_text(pdf_path)
 
-        # OCR fallback
         if not text.strip():
             logging.warning("No text found → Using OCR")
             print("⚠️ No text found → Using OCR")
             text = extract_text_with_ocr(pdf_path)
 
-        # ============================================
-        # 🧠 STEP 2 — TEXT VALIDATION (FIXED)
-        # ============================================
+        # STEP 2 — TEXT VALIDATION
         clean_text = text.strip()
 
         if not clean_text:
@@ -79,34 +57,23 @@ def process_pdf(pdf_path):
             return {
                 "status": "failed",
                 "reason": "No readable text found (OCR failed)",
-                "file": pdf_path
+                "file": pdf_path,
             }
 
         print(f"✅ Text length: {len(clean_text)}")
 
-        # Weak text handling
-        weak_text = False
-        if len(clean_text) < 50:
-            weak_text = True
+        weak_text = len(clean_text) < 50
+        if weak_text:
             logging.warning("⚠️ Weak text detected")
             print("⚠️ Weak text → extraction may be poor")
 
-        # ============================================
-        # 📐 STEP 3 — LAYOUT EXTRACTION
-        # ============================================
-        layout_output = extract_layout_data(pdf_path) or {
-            "invoice_details": {},
-            "items": []
-        }
+        # STEP 3 — LAYOUT EXTRACTION
+        layout_output = extract_layout_data(pdf_path) or {"invoice_details": {}, "items": []}
 
-        # ============================================
-        # 🤖 STEP 4 — SMART EXTRACTION
-        # ============================================
+        # STEP 4 — SMART EXTRACTION
         invoice_data, confidence = smart_extract_data(clean_text)
-
         print(f"🧠 Confidence: {confidence}")
 
-        # Force fallback if weak text
         if weak_text:
             confidence = 0
 
@@ -115,33 +82,38 @@ def process_pdf(pdf_path):
             print("⚠️ Using regex fallback")
             invoice_data = extract_data(clean_text)
 
-        layout_output["invoice_details"] = invoice_data
+        # FIX: Merge layout_details into invoice_data instead of overwriting.
+        # Original code did layout_output["invoice_details"] = invoice_data which
+        # discarded any fields the layout parser found (e.g. total).
+        merged = {**layout_output.get("invoice_details", {}), **{
+            k: v for k, v in invoice_data.items() if v is not None
+        }}
+        layout_output["invoice_details"] = merged
 
-        # ============================================
-        # 📦 STEP 5 — ITEMS FALLBACK
-        # ============================================
+        # STEP 5 — ITEMS FALLBACK
         if not layout_output["items"]:
             logging.warning("Items fallback triggered")
             tables = extract_tables(pdf_path)
             layout_output["items"] = extract_items_from_tables(tables)
 
-        # ============================================
-        # 🆔 STEP 6 — ADD IDS
-        # ============================================
+        # FIX: Compute per-item line totals if amount is missing but qty+price exist.
+        for item in layout_output["items"]:
+            if not item.get("amount") and item.get("quantity") and item.get("unit_price"):
+                item["amount"] = round(item["quantity"] * item["unit_price"], 2)
+
+        # STEP 6 — ADD IDs + METADATA
         final_output = layout_output
         final_output["document_id"] = str(uuid.uuid4())
         final_output["file_hash"] = file_hash
+        final_output["source_file"] = os.path.basename(pdf_path)  # FIX: was missing
 
         print(f"🆔 Document ID: {final_output['document_id']}")
 
-        # ============================================
-        # 💾 STEP 7 — SAVE JSON
-        # ============================================
+        # STEP 7 — SAVE JSON
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-
         output_path = os.path.join(
             OUTPUT_FOLDER,
-            os.path.basename(pdf_path).replace(".pdf", ".json")
+            os.path.basename(pdf_path).replace(".pdf", ".json"),
         )
 
         with open(output_path, "w", encoding="utf-8") as f:
@@ -149,15 +121,10 @@ def process_pdf(pdf_path):
 
         print(f"💾 JSON saved: {output_path}")
 
-        # ============================================
-        # 🗄️ STEP 8 — SAVE TO DB
-        # ============================================
+        # STEP 8 — SAVE TO DB
         save_to_db(final_output, file_hash)
         print("💾 Saved to DB")
 
-        # ============================================
-        # ⏱️ STEP 9 — TIME TRACKING
-        # ============================================
         end = time.time()
         print(f"⏱️ Time: {round(end - start, 2)} sec")
 
@@ -165,28 +132,19 @@ def process_pdf(pdf_path):
 
     except Exception as e:
         logging.exception(f"🔥 FULL ERROR in file: {pdf_path}")
-        return {
-            "status": "error",
-            "message": str(e),
-            "file": pdf_path
-        }
+        return {"status": "error", "message": str(e), "file": pdf_path}
 
 
-# ============================================
-# 🧠 MAIN FUNCTION
-# ============================================
 def main():
     setup_logger()
     logging.info("Application started.")
     print("🚀 Application Started")
 
     create_table()
-
     os.makedirs(PDF_FOLDER, exist_ok=True)
     os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
     pdf_files = [f for f in os.listdir(PDF_FOLDER) if f.endswith(".pdf")]
-
     print(f"📂 PDFs: {pdf_files}")
 
     if not pdf_files:
@@ -196,19 +154,14 @@ def main():
     try:
         with Pool(4) as p:
             p.map(process_wrapper, pdf_files)
-
     except Exception as e:
         logging.error(f"Multiprocessing failed: {str(e)}")
         print("⚠️ Multiprocessing failed → fallback")
-
         for file in pdf_files:
             process_pdf(os.path.join(PDF_FOLDER, file))
 
     print("\n🎉 All files processed!")
 
 
-# ============================================
-# 🚀 ENTRY POINT
-# ============================================
 if __name__ == "__main__":
     main()
